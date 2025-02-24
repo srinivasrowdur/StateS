@@ -18,15 +18,31 @@ def classification_agent(exception_details):
         f"{exception_details}\n\n"
         "Provide your answer in a JSON format with keys 'type', 'priority', and 'complexity'."
     )
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a classification expert."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=150
-    )
-    return response.choices[0].message.content
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a classification expert. Always return valid JSON."}, 
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=150
+        )
+        content = response.choices[0].message.content
+        # Ensure the response is valid JSON
+        json.loads(content)  # Validate JSON format
+        return content
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "type": "Error: Invalid response format",
+            "priority": "N/A",
+            "complexity": f"Failed to process the classification: {str(e)}"
+        })
+    except Exception as e:
+        return json.dumps({
+            "type": "Error: System error",
+            "priority": "N/A",
+            "complexity": f"An unexpected error occurred: {str(e)}"
+        })
 
 def resolution_suggestion_agent(exception_details):
     prompt = (
@@ -144,6 +160,9 @@ def main():
     st.markdown("### 🔄 Exception Processing Engine")
     col1, col2 = st.columns([2, 1], gap="large")
 
+    # Initialize results variable
+    results = {}
+
     with col1:
         st.container()
         exception_details = st.text_area(
@@ -156,28 +175,27 @@ def main():
                 results = process_exception(exception_details)
             st.success("✅ Analysis Complete!")
 
-            # Results container with fixed height
-            results_container = st.container()
-            with results_container:
-                st.markdown("<div style='min-height: 400px; overflow-y: auto;'>", unsafe_allow_html=True)
-                # Results in tabs for better organization
-                tab1, tab2, tab3 = st.tabs(["📋 Classification", "💡 Resolution", "📝 Explanation"])
+            # Results container with two columns
+            st.markdown("<div style='min-height: 400px; overflow-y: auto;'>", unsafe_allow_html=True)
+            col_left, col_right = st.columns(2)
             
-            with tab1:
+            # Left column: Classification and Resolution
+            with col_left:
                 try:
                     classification = json.loads(results.get("classification", "{}"))
                     st.markdown("#### Classification Details")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Type", classification.get("type", "N/A"))
-                    with col2:
-                        st.metric("Priority", classification.get("priority", "N/A"))
-                    with col3:
-                        st.metric("Complexity", classification.get("complexity", "N/A"))
-                except Exception:
-                    st.error("Unable to process classification")
+                    if classification:
+                        st.markdown(f"**Type:** {classification.get('type', 'N/A')}")
+                        st.markdown(f"**Priority:** {classification.get('priority', 'N/A')}")
+                        st.markdown(f"**Complexity:** {classification.get('complexity', 'N/A')}")
+                    else:
+                        st.error("No classification data available")
+                except Exception as e:
+                    st.error(f"Classification processing error: {str(e)}")
+                    st.markdown("<div style='height: 8px'></div>", unsafe_allow_html=True)
 
-            with tab2:
+            # Right column: Resolution and Explanation
+            with col_right:
                 try:
                     resolution = json.loads(results.get("resolution", "{}"))
                     st.markdown("#### AI-Generated Resolution")
@@ -185,44 +203,38 @@ def main():
                     st.progress(float(resolution.get('confidence', '0').rstrip('%'))/100)
                     st.markdown(f"**Confidence Score:** {resolution.get('confidence', 'N/A')}")
                     st.info(f"**Rationale:** {resolution.get('rationale', 'N/A')}")
+                    
+                    st.markdown("#### Detailed Explanation")
+                    st.info(results.get("explanation", "No explanation available."))
                 except Exception:
                     st.error("Unable to process resolution suggestion")
 
-            with tab3:
-                st.markdown("#### Detailed Explanation")
-                st.info(results.get("explanation", "No explanation available."))
-
     with col2:
-        st.markdown("### 🎯 Action Center")
-        st.markdown("""<div style='background-color: #f8f9fa; padding: 1rem; border-radius: 0.5rem;'>
-            <h4>Resolution Workflow</h4></div>""", unsafe_allow_html=True)
-        
-        # Replacing nested columns with a horizontal layout using CSS
-        st.markdown("""
-            <div style='display: flex; gap: 1rem; margin-bottom: 1rem;'>
-                <div style='flex: 1;'>
-                    <button class='stButton' style='width: 100%;'>✅ Approve</button>
-                </div>
-                <div style='flex: 1;'>
-                    <button class='stButton' style='width: 100%;'>❌ Reject</button>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        if st.button("✅ Approve"):
-            st.success("Resolution approved for execution")
-        if st.button("❌ Reject"):
-            st.error("Resolution rejected")
-        if st.button("✏️ Modify", use_container_width=True):
-            st.info("Opening modification interface...")
+        # Only show Action Center and Insights after processing
+        if exception_details and results:
+            st.markdown("### 🎯 Action Center")
+            st.markdown("""<div style='background-color: #f8f9fa; padding: 1rem; border-radius: 0.5rem;'>
+                <h4>Resolution Workflow</h4></div>""", unsafe_allow_html=True)
+            
+            # Action buttons
+            col_approve, col_reject = st.columns(2)
+            with col_approve:
+                if st.button("✅ Approve", key="approve_btn"):
+                    st.success("Resolution approved for execution")
+            with col_reject:
+                if st.button("❌ Reject", key="reject_btn"):
+                    st.error("Resolution rejected")
+            
+            if st.button("✏️ Modify", use_container_width=True, key="modify_btn"):
+                st.info("Opening modification interface...")
 
-        # Additional insights
-        st.markdown("### 📈 Insights")
-        st.markdown("""<div style='background-color: #f8f9fa; padding: 1rem; border-radius: 0.5rem;'>
-            <p><strong>AI Confidence:</strong> High</p>
-            <p><strong>Similar Cases:</strong> 15 found</p>
-            <p><strong>Avg. Resolution Time:</strong> 45 seconds</p>
-            </div>""", unsafe_allow_html=True)
+            # Additional insights
+            st.markdown("### 📈 Insights")
+            st.markdown("""<div style='background-color: #f8f9fa; padding: 1rem; border-radius: 0.5rem;'>
+                <p><strong>AI Confidence:</strong> High</p>
+                <p><strong>Similar Cases:</strong> 15 found</p>
+                <p><strong>Avg. Resolution Time:</strong> 45 seconds</p>
+                </div>""", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
